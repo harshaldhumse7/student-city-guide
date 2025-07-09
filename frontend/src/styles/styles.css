@@ -1,0 +1,17 @@
+/* Custom component or scoped styles */
+
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+
+.container {
+  max-width: 600px;
+  margin: auto;
+  text-align: center;
+}
+
+select {
+  padding: 10px;
+  font-size: 16px;
+}

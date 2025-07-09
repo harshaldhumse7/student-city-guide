@@ -1,0 +1,36 @@
+[
+  {
+    "collegeName": "COEP Technological University",
+    "services": [
+      {
+        "name": "Café Goodluck",
+        "type": "Restaurant",
+        "latitude": 18.516726,
+        "longitude": 73.856255
+      },
+      {
+        "name": "Pune Station",
+        "type": "Transport",
+        "latitude": 18.5289,
+        "longitude": 73.8747
+      }
+    ]
+  },
+  {
+    "collegeName": "IIT Bombay",
+    "services": [
+      {
+        "name": "Powai Lake",
+        "type": "Nature",
+        "latitude": 19.1177,
+        "longitude": 72.9043
+      },
+      {
+        "name": "R-City Mall",
+        "type": "Shopping",
+        "latitude": 19.1094,
+        "longitude": 72.9095
+      }
+    ]
+  }
+]
