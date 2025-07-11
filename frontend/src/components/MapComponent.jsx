@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { fetchNearbyColleges } from '../api/collegeApi';
 import { fetchNearbyServices } from '../api/servicesApi';
@@ -6,23 +6,14 @@ import { FaBed, FaUtensils, FaTshirt, FaPencilRuler, FaStar } from 'react-icons/
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
-// Recenter map helper
-function RecenterMap({ center }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, 14);
-  }, [center, map]);
-  return null;
-}
-
-// Default Leaflet marker icon
-const defaultIcon = L.icon({
+// Fix default Leaflet icon path issue
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-// Icons by type
 const typeIcons = {
   pg: <FaBed className="inline mr-1" />,
   food: <FaUtensils className="inline mr-1" />,
@@ -30,33 +21,71 @@ const typeIcons = {
   stationery: <FaPencilRuler className="inline mr-1" />,
 };
 
+// Component to recenter map
+function RecenterMap({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) map.setView(center, 14);
+  }, [center, map]);
+  return null;
+}
+
 function MapComponent({ center, userLocation }) {
   const [nearbyColleges, setNearbyColleges] = useState([]);
   const [selectedCollege, setSelectedCollege] = useState(null);
   const [filteredServices, setFilteredServices] = useState([]);
   const [selectedType, setSelectedType] = useState('all');
 
+  // Fetch nearby colleges based on user location
   useEffect(() => {
     if (userLocation) {
-      fetchNearbyColleges(userLocation.lat, userLocation.lng).then(setNearbyColleges);
+      fetchNearbyColleges(userLocation.lat, userLocation.lng)
+        .then(setNearbyColleges)
+        .catch(console.error);
     }
   }, [userLocation]);
 
+  // Fetch services based on selected college or user location
   useEffect(() => {
-    const radiusKm = 2.5;
+    const radiusMeters = 2500;
     const origin = selectedCollege || userLocation;
 
-    if (origin) {
-      fetchNearbyServices(origin.lat, origin.lng || origin.lon, radiusKm * 1000, selectedType)
-        .then(setFilteredServices)
-        .catch((err) => {
-          console.error('Error fetching services:', err);
-          setFilteredServices([]);
-        });
-    } else {
+    if (!origin) {
       setFilteredServices([]);
+      return;
     }
+
+    const lat = origin.lat;
+    const lng = origin.lng || origin.lon;
+
+    fetchNearbyServices(lat, lng, radiusMeters, selectedType)
+      .then(setFilteredServices)
+      .catch((err) => {
+        console.error('Error fetching services:', err);
+        setFilteredServices([]);
+      });
   }, [selectedCollege, selectedType, userLocation]);
+
+  // Handle college selection from dropdown
+  const handleCollegeChange = useCallback((e) => {
+    const value = e.target.value;
+    if (value) {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed.lat && (parsed.lng || parsed.lon)) {
+          setSelectedCollege(parsed);
+        }
+      } catch {
+        setSelectedCollege(null);
+      }
+    } else {
+      setSelectedCollege(null);
+    }
+  }, []);
+
+  const mapCenter = selectedCollege
+    ? [selectedCollege.lat, selectedCollege.lng || selectedCollege.lon]
+    : [userLocation?.lat, userLocation?.lng];
 
   return (
     <div>
@@ -64,21 +93,7 @@ function MapComponent({ center, userLocation }) {
       {nearbyColleges.length > 0 && (
         <div className="p-4 bg-white rounded shadow mb-4">
           <label className="mr-2 font-semibold">Select a nearby college:</label>
-          <select
-            onChange={(e) => {
-              const selectedValue = e.target.value;
-              if (selectedValue) {
-                try {
-                  setSelectedCollege(JSON.parse(selectedValue));
-                } catch {
-                  setSelectedCollege(null);
-                }
-              } else {
-                setSelectedCollege(null);
-              }
-            }}
-            className="border px-3 py-1 rounded"
-          >
+          <select onChange={handleCollegeChange} className="border px-3 py-1 rounded">
             <option value="">-- Select --</option>
             {nearbyColleges.map((college, index) => (
               <option key={index} value={JSON.stringify(college)}>
@@ -89,7 +104,7 @@ function MapComponent({ center, userLocation }) {
         </div>
       )}
 
-      {/* Filter by type */}
+      {/* Service Type Filter */}
       {(selectedCollege || userLocation) && (
         <div className="p-4 bg-white rounded shadow mb-4">
           <label className="mr-2 font-semibold">Filter by service type:</label>
@@ -109,34 +124,34 @@ function MapComponent({ center, userLocation }) {
 
       {/* Map Section */}
       <div className="map-container" style={{ height: '500px', width: '100%' }}>
-        <MapContainer center={center} zoom={14} scrollWheelZoom>
-          <RecenterMap center={selectedCollege ? [selectedCollege.lat, selectedCollege.lon] : [userLocation?.lat, userLocation?.lng]} />
+        <MapContainer center={mapCenter} zoom={14} scrollWheelZoom>
+          <RecenterMap center={mapCenter} />
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* User location marker */}
+          {/* User Marker */}
           {userLocation && (
-            <Marker position={[userLocation.lat, userLocation.lng]} icon={defaultIcon}>
+            <Marker position={[userLocation.lat, userLocation.lng]}>
               <Popup>You are here</Popup>
             </Marker>
           )}
 
-          {/* College marker */}
+          {/* College Marker */}
           {selectedCollege && (
-            <Marker position={[selectedCollege.lat, selectedCollege.lon]} icon={defaultIcon}>
+            <Marker position={[selectedCollege.lat, selectedCollege.lng || selectedCollege.lon]}>
               <Popup>{selectedCollege.name}</Popup>
             </Marker>
           )}
 
-          {/* Nearby service markers */}
+          {/* Service Markers */}
           {filteredServices.map((service) => (
-            <Marker key={service.id} position={[service.lat, service.lng]} icon={defaultIcon}>
+            <Marker key={service.id} position={[service.lat, service.lng]}>
               <Popup>
                 <strong>{service.name}</strong>
                 <br />
-                Type: {service.type} {typeIcons[service.type]}
+                Type: {typeIcons[service.type]} {service.type}
                 <br />
                 Contact: {service.contact}
                 <br />
@@ -158,7 +173,7 @@ function MapComponent({ center, userLocation }) {
         </p>
       )}
 
-      {/* No services message */}
+      {/* No Services Fallback */}
       {(selectedCollege || userLocation) && filteredServices.length === 0 && (
         <p className="text-center text-gray-500 mt-4">
           No services found for selected filters.

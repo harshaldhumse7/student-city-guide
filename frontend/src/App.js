@@ -1,3 +1,4 @@
+// App.js
 import React, { useState, useEffect } from "react";
 import {
   MapContainer,
@@ -17,7 +18,20 @@ import {
   FaLocationArrow,
 } from "react-icons/fa";
 
-// Icons for types
+// Fix Leaflet's default icon issue with React
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+// Fix default icon
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
+// Icons for each service type
 const typeIcons = {
   pg: <FaBed className="inline mr-1" />,
   food: <FaUtensils className="inline mr-1" />,
@@ -25,23 +39,18 @@ const typeIcons = {
   stationery: <FaPencilRuler className="inline mr-1" />,
 };
 
-// Default Marker Icon
-const defaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
-
-// Recenter Map
+// Recenter map component
 const RecenterMap = ({ center }) => {
   const map = useMap();
   useEffect(() => {
-    map.setView(center, 14);
+    if (center) {
+      map.setView(center, 14);
+    }
   }, [center, map]);
   return null;
 };
 
-// Distance Calculation (Haversine)
+// Distance calculation using Haversine formula
 function calculateDistance(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -58,21 +67,30 @@ const App = () => {
   const [colleges, setColleges] = useState({});
   const [services, setServices] = useState([]);
   const [selectedCollege, setSelectedCollege] = useState("");
-  const [mapCenter, setMapCenter] = useState([20.5937, 78.9629]);
+  const [mapCenter, setMapCenter] = useState([20.5937, 78.9629]); // Default center: India
   const [selectedType, setSelectedType] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [userLocation, setUserLocation] = useState(null);
   const [useUserLocation, setUseUserLocation] = useState(false);
 
   const serviceTypes = ["pg", "food", "laundry", "stationery"];
 
-  // Fetch colleges and services
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Fetch data
   useEffect(() => {
     fetch("http://localhost:5000/colleges")
       .then((res) => res.json())
       .then((data) => {
         const formatted = {};
-        data.forEach((c) => (formatted[c.name] = { lat: c.lat, lng: c.lng }));
+        data.forEach((c) => {
+          formatted[c.name] = { lat: c.lat, lng: c.lng };
+        });
         setColleges(formatted);
       });
 
@@ -94,14 +112,14 @@ const App = () => {
           setMapCenter([coords.lat, coords.lng]);
         },
         () => {
-          alert("Permission denied for location.");
+          alert("Location access denied.");
           setUseUserLocation(false);
         }
       );
     }
   }, [useUserLocation]);
 
-  // College select
+  // Handle college selection
   const handleCollegeChange = (e) => {
     const college = e.target.value;
     setSelectedCollege(college);
@@ -113,20 +131,25 @@ const App = () => {
     }
   };
 
-  // Filter and compute distance
+  const center = useUserLocation
+    ? userLocation
+    : selectedCollege && colleges[selectedCollege]
+    ? colleges[selectedCollege]
+    : null;
+
+  // Filter services
   let filteredServices = [];
-  if ((useUserLocation && userLocation) || (selectedCollege && colleges[selectedCollege])) {
-    const center = useUserLocation ? userLocation : colleges[selectedCollege];
+  if (center) {
     filteredServices = services
       .map((service) => {
         const dist = calculateDistance(center.lat, center.lng, service.lat, service.lng);
-        return { ...service, distance: dist.toFixed(2) + " km" };
+        return { ...service, distance: dist.toFixed(2) + " km", dist };
       })
       .filter(
         (s) =>
-          (!useUserLocation || calculateDistance(center.lat, center.lng, s.lat, s.lng) <= 3) &&
+          (!useUserLocation || s.dist <= 3) &&
           (selectedType === "all" || s.type === selectedType) &&
-          s.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+          s.name.toLowerCase().includes(debouncedSearch.toLowerCase()) &&
           (!selectedCollege || s.college === selectedCollege)
       );
   }
@@ -135,7 +158,7 @@ const App = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-center mb-6">Student City Guide</h1>
 
-      {/* Location Options */}
+      {/* Selection Controls */}
       <div className="flex justify-center gap-4 mb-4 flex-wrap">
         <select
           value={selectedCollege}
@@ -154,6 +177,8 @@ const App = () => {
           onClick={() => {
             setUseUserLocation(true);
             setSelectedCollege("");
+            setSelectedType("all");
+            setSearchTerm("");
           }}
           className={`flex items-center gap-2 px-4 py-2 rounded ${
             useUserLocation ? "bg-blue-600 text-white" : "bg-gray-200"
@@ -164,7 +189,7 @@ const App = () => {
       </div>
 
       {/* Filters */}
-      {(selectedCollege || useUserLocation) && (
+      {center && (
         <>
           <div className="flex justify-center gap-2 mb-4 flex-wrap">
             <button
@@ -193,7 +218,7 @@ const App = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search service by name or keyword"
+              placeholder="Search services by name or keyword"
               className="border px-4 py-2 rounded w-full max-w-md shadow-sm"
             />
           </div>
@@ -201,47 +226,45 @@ const App = () => {
       )}
 
       {/* Map */}
-      <div className="mb-8">
-        <MapContainer center={mapCenter} zoom={14} style={{ height: "400px" }}>
-          <RecenterMap center={mapCenter} />
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {selectedCollege && (
-            <Marker position={mapCenter} icon={defaultIcon}>
-              <Popup>
-                <strong>{selectedCollege}</strong>
-              </Popup>
-            </Marker>
-          )}
-          {useUserLocation && userLocation && (
-            <Marker position={[userLocation.lat, userLocation.lng]} icon={defaultIcon}>
-              <Popup>
-                <strong>You are here</strong>
-              </Popup>
-            </Marker>
-          )}
-          {filteredServices.map((s) => (
-            <Marker key={s.id} position={[s.lat, s.lng]} icon={defaultIcon}>
-              <Popup>
-                <strong>{s.name}</strong>
-                <br />
-                Type: {s.type}
-                <br />
-                Distance: {s.distance}
-                <br />
-                Contact: {s.contact}
-                <br />
-                Rating:{" "}
-                {Array.from({ length: s.rating }, (_, i) => (
-                  <FaStar key={i} className="inline text-yellow-400" />
-                ))}
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
-      </div>
+      {center && (
+        <div className="mb-8">
+          <MapContainer center={mapCenter} zoom={14} style={{ height: "400px" }}>
+            <RecenterMap center={mapCenter} />
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {(selectedCollege && colleges[selectedCollege]) && (
+              <Marker position={mapCenter} title="College Location">
+                <Popup><strong>{selectedCollege}</strong></Popup>
+              </Marker>
+            )}
+            {useUserLocation && userLocation && (
+              <Marker position={[userLocation.lat, userLocation.lng]} title="Your Location">
+                <Popup><strong>You are here</strong></Popup>
+              </Marker>
+            )}
+            {filteredServices.map((s) => (
+              <Marker key={s.id} position={[s.lat, s.lng]} title={s.name}>
+                <Popup>
+                  <strong>{s.name}</strong>
+                  <br />
+                  Type: {s.type}
+                  <br />
+                  Distance: {s.distance}
+                  <br />
+                  Contact: {s.contact}
+                  <br />
+                  Rating:{" "}
+                  {Array.from({ length: s.rating }, (_, i) => (
+                    <FaStar key={i} className="inline text-yellow-400" />
+                  ))}
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
+        </div>
+      )}
 
-      {/* Services List */}
-      {(selectedCollege || useUserLocation) && (
+      {/* Service Cards */}
+      {center && (
         <>
           <h2 className="text-2xl font-semibold mb-4">
             Nearby Services {selectedCollege && `for ${selectedCollege}`}
@@ -250,7 +273,9 @@ const App = () => {
             {filteredServices.map((s) => (
               <div key={s.id} className="border rounded-lg p-4 shadow-md bg-white">
                 <h3 className="text-lg font-bold mb-1">{s.name}</h3>
-                <p className="capitalize mb-1">{typeIcons[s.type]} {s.type}</p>
+                <p className="capitalize mb-1">
+                  {typeIcons[s.type]} {s.type}
+                </p>
                 <p>Distance: {s.distance}</p>
                 <p>Contact: {s.contact}</p>
                 <p className="flex items-center gap-1">
@@ -263,7 +288,7 @@ const App = () => {
             ))}
             {filteredServices.length === 0 && (
               <p className="col-span-full text-center text-gray-500">
-                No services found for selected filter or search.
+                No services found for the selected filter or search.
               </p>
             )}
           </div>

@@ -1,5 +1,7 @@
+const API_BASE_URL = "http://localhost:5000";
+
 export async function fetchNearbyServices(lat, lng, radiusMeters, type) {
-  const response = await fetch('http://localhost:5000/api/services');
+  const response = await fetch(`${API_BASE_URL}/api/services`);
   const data = await response.json();
 
   return data.filter((service) => {
