@@ -1,5 +1,5 @@
 // App.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -18,7 +18,6 @@ import {
   FaLocationArrow,
 } from "react-icons/fa";
 
-// Fix Leaflet's default icon issue with React
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
@@ -31,7 +30,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// Icons for each service type
 const typeIcons = {
   pg: <FaBed className="inline mr-1" />,
   food: <FaUtensils className="inline mr-1" />,
@@ -39,18 +37,46 @@ const typeIcons = {
   stationery: <FaPencilRuler className="inline mr-1" />,
 };
 
-// Recenter map component
-const RecenterMap = ({ center }) => {
+const RecenterMap = ({ lat, lng }) => {
   const map = useMap();
   useEffect(() => {
-    if (center) {
-      map.setView(center, 14);
+    if (lat !== undefined && lng !== undefined) {
+      map.setView([lat, lng], 14);
     }
-  }, [center, map]);
+  }, [lat, lng, map]);
   return null;
 };
 
-// Distance calculation using Haversine formula
+// 🟢 New Draggable User Marker Component
+const DraggableUserMarker = ({ position, setPosition }) => {
+  const markerRef = useRef(null);
+
+  const eventHandlers = {
+    dragend() {
+      const marker = markerRef.current;
+      if (marker != null) {
+        const newPos = marker.getLatLng();
+        setPosition({ lat: newPos.lat, lng: newPos.lng });
+      }
+    },
+  };
+
+  return (
+    <Marker
+      draggable={true}
+      eventHandlers={eventHandlers}
+      position={[position.lat, position.lng]}
+      ref={markerRef}
+    >
+      <Popup>
+        <strong>Your location</strong>
+        <br />
+        Drag to correct if needed.
+      </Popup>
+    </Marker>
+  );
+};
+
 function calculateDistance(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -67,7 +93,7 @@ const App = () => {
   const [colleges, setColleges] = useState({});
   const [services, setServices] = useState([]);
   const [selectedCollege, setSelectedCollege] = useState("");
-  const [mapCenter, setMapCenter] = useState([20.5937, 78.9629]); // Default center: India
+  const [mapCenter, setMapCenter] = useState([20.5937, 78.9629]);
   const [selectedType, setSelectedType] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -76,30 +102,39 @@ const App = () => {
 
   const serviceTypes = ["pg", "food", "laundry", "stationery"];
 
-  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Fetch data
   useEffect(() => {
-    fetch("http://localhost:5000/colleges")
+    fetch("http://localhost:5000/api/colleges")
       .then((res) => res.json())
       .then((data) => {
         const formatted = {};
         data.forEach((c) => {
-          formatted[c.name] = { lat: c.lat, lng: c.lng };
+          formatted[c.name] = {
+            lat: c.latitude || c.lat,
+            lng: c.longitude || c.lng,
+          };
         });
         setColleges(formatted);
       });
 
-    fetch("http://localhost:5000/services")
+    fetch("http://localhost:5000/api/services")
       .then((res) => res.json())
-      .then((data) => setServices(data));
+      .then((data) => {
+        const flattened = data.flatMap((item) =>
+          (item.services || []).map((svc, index) => ({
+            ...svc,
+            id: `${item.collegeName}-${svc.name}-${index}`,
+            college: item.collegeName,
+          }))
+        );
+        setServices(flattened);
+      });
   }, []);
 
-  // Get user location
   useEffect(() => {
     if (useUserLocation && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -112,14 +147,18 @@ const App = () => {
           setMapCenter([coords.lat, coords.lng]);
         },
         () => {
-          alert("Location access denied.");
+          alert("Location access denied or unavailable.");
           setUseUserLocation(false);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
         }
       );
     }
   }, [useUserLocation]);
 
-  // Handle college selection
   const handleCollegeChange = (e) => {
     const college = e.target.value;
     setSelectedCollege(college);
@@ -137,7 +176,6 @@ const App = () => {
     ? colleges[selectedCollege]
     : null;
 
-  // Filter services
   let filteredServices = [];
   if (center) {
     filteredServices = services
@@ -158,7 +196,7 @@ const App = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold text-center mb-6">Student City Guide</h1>
 
-      {/* Selection Controls */}
+      {/* College Selection */}
       <div className="flex justify-center gap-4 mb-4 flex-wrap">
         <select
           value={selectedCollege}
@@ -229,36 +267,47 @@ const App = () => {
       {center && (
         <div className="mb-8">
           <MapContainer center={mapCenter} zoom={14} style={{ height: "400px" }}>
-            <RecenterMap center={mapCenter} />
+            <RecenterMap lat={mapCenter[0]} lng={mapCenter[1]} />
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {(selectedCollege && colleges[selectedCollege]) && (
-              <Marker position={mapCenter} title="College Location">
+            {selectedCollege && (
+              <Marker position={mapCenter}>
                 <Popup><strong>{selectedCollege}</strong></Popup>
               </Marker>
             )}
             {useUserLocation && userLocation && (
-              <Marker position={[userLocation.lat, userLocation.lng]} title="Your Location">
-                <Popup><strong>You are here</strong></Popup>
-              </Marker>
+              <DraggableUserMarker
+                position={userLocation}
+                setPosition={(newPos) => {
+                  setUserLocation(newPos);
+                  setMapCenter([newPos.lat, newPos.lng]);
+                }}
+              />
             )}
-            {filteredServices.map((s) => (
-              <Marker key={s.id} position={[s.lat, s.lng]} title={s.name}>
-                <Popup>
-                  <strong>{s.name}</strong>
-                  <br />
-                  Type: {s.type}
-                  <br />
-                  Distance: {s.distance}
-                  <br />
-                  Contact: {s.contact}
-                  <br />
-                  Rating:{" "}
-                  {Array.from({ length: s.rating }, (_, i) => (
-                    <FaStar key={i} className="inline text-yellow-400" />
-                  ))}
-                </Popup>
-              </Marker>
-            ))}
+            {filteredServices.map((s) => {
+              if (
+                typeof s.lat !== "number" ||
+                typeof s.lng !== "number" ||
+                isNaN(s.lat) ||
+                isNaN(s.lng)
+              ) {
+                return null;
+              }
+
+              return (
+                <Marker key={s.id} position={[s.lat, s.lng]}>
+                  <Popup>
+                    <strong>{s.name}</strong><br />
+                    Type: {s.type}<br />
+                    Distance: {s.distance}<br />
+                    Contact: {s.contact}<br />
+                    Rating:{" "}
+                    {Array.from({ length: s.rating }, (_, i) => (
+                      <FaStar key={i} className="inline text-yellow-400" />
+                    ))}
+                  </Popup>
+                </Marker>
+              );
+            })}
           </MapContainer>
         </div>
       )}
